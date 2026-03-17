@@ -2,8 +2,12 @@
 Genshin Impact Dialogue Skipper
 - System tray app with toggle/quit hotkeys
 - Auto-detects Genshin Impact and notifies you
+- Pixel-based dialogue detection (only presses when dialogue is on screen)
+- Multi-resolution support
+- Loading screen detection
 - Rebindable hotkeys via tray menu
-- Optional Windows startup
+- Configurable in-game interaction key
+- Optional Windows startup (as admin via Task Scheduler)
 """
 
 import json
@@ -16,8 +20,10 @@ import tkinter as tk
 import winsound
 
 import psutil
+import pyautogui
 from PIL import Image, ImageDraw
 from pynput.keyboard import Key, KeyCode, Listener, Controller
+from win32api import GetSystemMetrics
 
 APP_NAME = "GenshinDialogueSkipper"
 INTERVAL = 0.05
@@ -28,6 +34,96 @@ active = False
 running = True
 genshin_running = False
 tray_icon = None
+
+# Screen resolution (detected once at startup)
+SCREEN_WIDTH = GetSystemMetrics(0)
+SCREEN_HEIGHT = GetSystemMetrics(1)
+
+# --- Resolution-adaptive pixel coordinates ---
+
+def scale_x(x_1080p):
+    """Scale an x coordinate from 1920-base to current resolution."""
+    return int(x_1080p / 1920 * SCREEN_WIDTH)
+
+
+def scale_y(y_1080p):
+    """Scale a y coordinate from 1080-base to current resolution."""
+    return int(y_1080p / 1080 * SCREEN_HEIGHT)
+
+
+# Pixel positions (based on 1920x1080, auto-scaled)
+def get_playing_icon_pos():
+    return scale_x(84), scale_y(46)
+
+
+def get_dialogue_icon_lower_pos():
+    return scale_x(1301), scale_y(808)
+
+
+def get_dialogue_icon_higher_pos():
+    return scale_x(1301), scale_y(790)
+
+
+def get_loading_screen_pos():
+    return scale_x(1200), scale_y(700)
+
+
+# --- Dialogue detection ---
+
+PLAYING_ICON_COLOR = (236, 229, 216)
+LOADING_SCREEN_WHITE = (255, 255, 255)
+DIALOGUE_ICON_WHITE = (255, 255, 255)
+
+
+def is_genshin_focused():
+    """Check if Genshin Impact is the active/foreground window."""
+    try:
+        title = pyautogui.getActiveWindowTitle()
+        return title == "Genshin Impact"
+    except Exception:
+        return False
+
+
+def is_dialogue_playing():
+    """Check if dialogue is playing (autoplay icon visible)."""
+    try:
+        x, y = get_playing_icon_pos()
+        return pyautogui.pixel(x, y) == PLAYING_ICON_COLOR
+    except Exception:
+        return False
+
+
+def is_dialogue_option_available():
+    """Check if a dialogue choice is on screen."""
+    try:
+        # Skip if loading screen (white)
+        lx, ly = get_loading_screen_pos()
+        if pyautogui.pixel(lx, ly) == LOADING_SCREEN_WHITE:
+            return False
+
+        # Check lower dialogue icon
+        dx, dy_low = get_dialogue_icon_lower_pos()
+        if pyautogui.pixel(dx, dy_low) == DIALOGUE_ICON_WHITE:
+            return True
+
+        # Check higher dialogue icon
+        _, dy_high = get_dialogue_icon_higher_pos()
+        if pyautogui.pixel(dx, dy_high) == DIALOGUE_ICON_WHITE:
+            return True
+
+        return False
+    except Exception:
+        return False
+
+
+def is_loading_screen():
+    """Check if a loading screen is active."""
+    try:
+        lx, ly = get_loading_screen_pos()
+        return pyautogui.pixel(lx, ly) == LOADING_SCREEN_WHITE
+    except Exception:
+        return False
+
 
 # --- Config ---
 
@@ -40,6 +136,8 @@ def get_config_path():
 DEFAULT_CONFIG = {
     "toggle_key": "Key.f6",
     "quit_key": "Key.f7",
+    "interaction_key": "f",
+    "smart_detect": True,
     "start_with_windows": False,
 }
 
@@ -50,7 +148,6 @@ def load_config():
         try:
             with open(path, "r") as f:
                 cfg = json.load(f)
-            # Merge with defaults for any missing keys
             for k, v in DEFAULT_CONFIG.items():
                 cfg.setdefault(k, v)
             return cfg
@@ -80,7 +177,7 @@ def parse_key(key_str):
 def key_to_str(key):
     """Convert a pynput key to a storable string."""
     if isinstance(key, Key):
-        return str(key)  # e.g. "Key.f6"
+        return str(key)
     if isinstance(key, KeyCode):
         if key.char:
             return key.char
@@ -155,13 +252,39 @@ def quit_app():
 # --- Auto-press thread ---
 
 def auto_press():
+    interaction_key = config.get("interaction_key", "f")
+    smart = config.get("smart_detect", True)
+
     while running:
-        if active:
-            keyboard.press('f')
-            keyboard.release('f')
-            time.sleep(INTERVAL)
-        else:
+        if not active:
             time.sleep(0.1)
+            continue
+
+        # Only press when Genshin is focused
+        if not is_genshin_focused():
+            time.sleep(0.2)
+            continue
+
+        if smart:
+            # Smart mode: only press when dialogue is detected
+            if is_loading_screen():
+                time.sleep(0.2)
+                continue
+
+            dialogue = is_dialogue_playing()
+            options = is_dialogue_option_available()
+
+            if dialogue or options:
+                keyboard.press(interaction_key)
+                keyboard.release(interaction_key)
+                time.sleep(INTERVAL)
+            else:
+                time.sleep(0.1)
+        else:
+            # Dumb mode: just spam the key
+            keyboard.press(interaction_key)
+            keyboard.release(interaction_key)
+            time.sleep(INTERVAL)
 
 
 # --- Genshin detection thread ---
@@ -216,15 +339,12 @@ def rebind_key(label, config_key):
     result = [None]
 
     def on_key(event):
-        # Map tkinter keysym to pynput key
         ks = event.keysym.lower()
-        # Try function keys
         if ks.startswith("f") and ks[1:].isdigit():
             result[0] = getattr(Key, ks, None)
         elif len(ks) == 1:
             result[0] = KeyCode.from_char(ks)
         else:
-            # Try mapping common names
             mapping = {
                 "escape": Key.esc, "space": Key.space,
                 "return": Key.enter, "tab": Key.tab,
@@ -257,8 +377,36 @@ def rebind_key(label, config_key):
         else:
             quit_key = result[0]
 
-        # Restart listener with new keys
         restart_listener()
+
+
+def change_interaction_key():
+    """Open a small tkinter window to set the in-game interaction key."""
+    result = [None]
+
+    def on_key(event):
+        ks = event.keysym.lower()
+        if len(ks) == 1:
+            result[0] = ks
+            root.destroy()
+
+    root = tk.Tk()
+    root.title("Interaction Key")
+    root.geometry("300x100")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+    tk.Label(
+        root,
+        text=f"Press your in-game interaction key\n(currently: {config.get('interaction_key', 'f').upper()})",
+        font=("Segoe UI", 12),
+    ).pack(expand=True)
+    root.bind("<Key>", on_key)
+    root.focus_force()
+    root.mainloop()
+
+    if result[0] is not None:
+        config["interaction_key"] = result[0]
+        save_config(config)
 
 
 listener_ref = [None]
@@ -296,13 +444,11 @@ def enable_startup():
         else:
             exe_path = os.path.abspath(__file__)
 
-        # Delete existing task if any
         subprocess.run(
             ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
             capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
-        # Create a task that runs at logon with highest privileges
         subprocess.run(
             [
                 "schtasks", "/Create",
@@ -339,6 +485,11 @@ def toggle_startup():
         enable_startup()
 
 
+def toggle_smart_detect():
+    config["smart_detect"] = not config.get("smart_detect", True)
+    save_config(config)
+
+
 # --- Tray menu ---
 
 def setup_tray():
@@ -354,8 +505,14 @@ def setup_tray():
     def on_rebind_quit(icon, item):
         threading.Thread(target=lambda: rebind_key("Quit App", "quit_key"), daemon=True).start()
 
+    def on_change_interaction(icon, item):
+        threading.Thread(target=change_interaction_key, daemon=True).start()
+
     def on_toggle_startup(icon, item):
         toggle_startup()
+
+    def on_toggle_smart(icon, item):
+        toggle_smart_detect()
 
     def on_quit(icon, item):
         quit_app()
@@ -363,10 +520,23 @@ def setup_tray():
     def startup_checked(item):
         return is_startup_enabled()
 
+    def smart_checked(item):
+        return config.get("smart_detect", True)
+
     menu = pystray.Menu(
         pystray.MenuItem(
             lambda text: f"Toggle ({key_display_name(config['toggle_key'])})",
             on_toggle,
+        ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            "Smart Dialogue Detection",
+            on_toggle_smart,
+            checked=smart_checked,
+        ),
+        pystray.MenuItem(
+            lambda text: f"Interaction Key ({config.get('interaction_key', 'f').upper()})",
+            on_change_interaction,
         ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(

@@ -2,3 +2,5 @@ pynput
 pystray
 Pillow
 psutil
+pyautogui
+pywin32

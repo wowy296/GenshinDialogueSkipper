@@ -306,8 +306,6 @@ def auto_press():
 # --- Auto-dash thread ---
 
 def auto_dash():
-    DASH_INTERVAL = 0.1
-
     while running:
         if not dash_active:
             time.sleep(0.1)
@@ -322,10 +320,16 @@ def auto_dash():
             time.sleep(0.2)
             continue
 
+        # Hold the dash key down, release briefly, repeat
         dash_key_val = parse_key(config.get("dash_key", "Key.shift_l"))
         keyboard.press(dash_key_val)
+        # Hold for 0.5s, checking if we should stop
+        for _ in range(10):
+            if not dash_active or not running:
+                break
+            time.sleep(0.05)
         keyboard.release(dash_key_val)
-        time.sleep(DASH_INTERVAL)
+        time.sleep(0.02)
 
 
 # --- Genshin detection thread ---
@@ -424,6 +428,8 @@ def rebind_key(label, config_key):
             dash_toggle_key = result[0]
 
         restart_listener()
+        if tray_icon:
+            tray_icon.update_menu()
 
 
 def change_interaction_key():
@@ -453,6 +459,8 @@ def change_interaction_key():
     if result[0] is not None:
         config["interaction_key"] = result[0]
         save_config(config)
+        if tray_icon:
+            tray_icon.update_menu()
 
 
 def change_dash_key():
@@ -496,6 +504,8 @@ def change_dash_key():
     if result[0] is not None:
         config["dash_key"] = key_to_str(result[0])
         save_config(config)
+        if tray_icon:
+            tray_icon.update_menu()
 
 
 listener_ref = [None]

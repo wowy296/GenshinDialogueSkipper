@@ -138,6 +138,7 @@ DEFAULT_CONFIG = {
     "quit_key": "Key.f7",
     "interaction_key": "f",
     "smart_detect": True,
+    "overlay_enabled": True,
     "start_with_windows": False,
 }
 
@@ -414,6 +415,77 @@ def change_interaction_key():
 
 
 listener_ref = [None]
+overlay_root = None
+overlay_label = None
+
+
+def setup_overlay():
+    """Create a transparent, click-through overlay window."""
+    global overlay_root, overlay_label
+    import ctypes
+
+    overlay_root = tk.Tk()
+    overlay_root.title("GDS Overlay")
+    overlay_root.overrideredirect(True)
+    overlay_root.attributes("-topmost", True)
+    overlay_root.attributes("-alpha", 0.85)
+
+    # Transparent background with click-through
+    transparent_color = "#010101"
+    overlay_root.configure(bg=transparent_color)
+    overlay_root.attributes("-transparentcolor", transparent_color)
+
+    # Position: top-left corner with a small margin
+    overlay_root.geometry(f"+20+20")
+
+    overlay_label = tk.Label(
+        overlay_root,
+        text="Skip: OFF",
+        font=("Segoe UI Semibold", 12),
+        fg="#FF4444",
+        bg="#1a1a1a",
+        padx=8,
+        pady=4,
+    )
+    overlay_label.pack()
+
+    # Make the window click-through on Windows
+    hwnd = ctypes.windll.user32.FindWindowW(None, "GDS Overlay")
+    if hwnd:
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x80000
+        WS_EX_TRANSPARENT = 0x20
+        WS_EX_NOACTIVATE = 0x08000000
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        ctypes.windll.user32.SetWindowLongW(
+            hwnd, GWL_EXSTYLE,
+            style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+        )
+
+    overlay_root.withdraw()  # Start hidden
+
+
+def run_overlay():
+    """Run the overlay mainloop (must be on its own thread or main thread)."""
+    setup_overlay()
+    # Periodic self-update via after()
+    def tick():
+        if not running:
+            overlay_root.destroy()
+            return
+        if config.get("overlay_enabled", True) and genshin_running and is_genshin_focused():
+            if active:
+                overlay_label.configure(text="Skip: ON", fg="#44FF44")
+            else:
+                overlay_label.configure(text="Skip: OFF", fg="#FF4444")
+            overlay_root.deiconify()
+            overlay_root.lift()
+        else:
+            overlay_root.withdraw()
+        overlay_root.after(500, tick)
+
+    overlay_root.after(500, tick)
+    overlay_root.mainloop()
 
 
 def restart_listener():
@@ -494,6 +566,17 @@ def toggle_smart_detect():
     save_config(config)
 
 
+def toggle_overlay():
+    config["overlay_enabled"] = not config.get("overlay_enabled", True)
+    save_config(config)
+    # If disabled, hide overlay immediately
+    if not config["overlay_enabled"] and overlay_root:
+        try:
+            overlay_root.after(0, overlay_root.withdraw)
+        except Exception:
+            pass
+
+
 # --- Tray menu ---
 
 def setup_tray():
@@ -518,6 +601,9 @@ def setup_tray():
     def on_toggle_smart(icon, item):
         toggle_smart_detect()
 
+    def on_toggle_overlay(icon, item):
+        toggle_overlay()
+
     def on_quit(icon, item):
         quit_app()
 
@@ -526,6 +612,9 @@ def setup_tray():
 
     def smart_checked(item):
         return config.get("smart_detect", True)
+
+    def overlay_checked(item):
+        return config.get("overlay_enabled", True)
 
     menu = pystray.Menu(
         pystray.MenuItem(
@@ -537,6 +626,11 @@ def setup_tray():
             "Smart Dialogue Detection",
             on_toggle_smart,
             checked=smart_checked,
+        ),
+        pystray.MenuItem(
+            "In-Game Overlay",
+            on_toggle_overlay,
+            checked=overlay_checked,
         ),
         pystray.MenuItem(
             lambda text: f"Interaction Key ({config.get('interaction_key', 'f').upper()})",
@@ -574,6 +668,8 @@ def setup_tray():
     # Start background threads
     threading.Thread(target=auto_press, daemon=True).start()
     threading.Thread(target=genshin_watcher, daemon=True).start()
+    if config.get("overlay_enabled", True):
+        threading.Thread(target=run_overlay, daemon=True).start()
 
     listener = Listener(on_press=on_press)
     listener.start()

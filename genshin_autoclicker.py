@@ -1,13 +1,12 @@
 """
-Genshin Impact Dialogue Skipper & Auto-Dash
+Genshin Impact Dialogue Skipper
 - System tray app with toggle/quit hotkeys
 - Auto-detects Genshin Impact and notifies you
 - Pixel-based dialogue detection (only presses when dialogue is on screen)
-- Auto-dash: spams sprint key while walking in the overworld
 - Multi-resolution support
 - Loading screen detection
 - Rebindable hotkeys via tray menu
-- Configurable in-game interaction key and dash key
+- Configurable in-game interaction key
 - Optional Windows startup (as admin via Task Scheduler)
 """
 
@@ -32,7 +31,6 @@ GENSHIN_PROCESSES = {"genshinimpact.exe", "yuanshen.exe"}
 
 keyboard = Controller()
 active = False
-dash_active = False
 running = True
 genshin_running = False
 tray_icon = None
@@ -138,9 +136,7 @@ def get_config_path():
 DEFAULT_CONFIG = {
     "toggle_key": "Key.f6",
     "quit_key": "Key.f7",
-    "dash_toggle_key": "Key.f5",
     "interaction_key": "f",
-    "dash_key": "Key.shift_l",
     "smart_detect": True,
     "start_with_windows": False,
 }
@@ -201,7 +197,6 @@ def key_display_name(key_str):
 
 toggle_key = parse_key(config["toggle_key"])
 quit_key = parse_key(config["quit_key"])
-dash_toggle_key = parse_key(config["dash_toggle_key"])
 
 # --- Icon ---
 
@@ -216,14 +211,14 @@ def make_icon(color):
 def update_tray():
     if tray_icon is None:
         return
-    if active or dash_active:
+    if active:
         tray_icon.icon = make_icon((0, 200, 0))
+        status = "ON"
     else:
         tray_icon.icon = make_icon((180, 0, 0))
-    skip_status = "Skip: ON" if active else "Skip: OFF"
-    dash_status = "Dash: ON" if dash_active else "Dash: OFF"
+        status = "OFF"
     genshin_status = "Genshin: Running" if genshin_running else "Genshin: Not detected"
-    tray_icon.title = f"{skip_status} | {dash_status} | {genshin_status}"
+    tray_icon.title = f"Dialogue Skipper: {status} | {genshin_status}"
 
 
 # --- Toggle / Quit ---
@@ -246,20 +241,9 @@ def toggle():
     update_tray()
 
 
-def toggle_dash():
-    global dash_active
-    dash_active = not dash_active
-    if dash_active:
-        threading.Thread(target=beep_on, daemon=True).start()
-    else:
-        threading.Thread(target=beep_off, daemon=True).start()
-    update_tray()
-
-
 def quit_app():
-    global active, dash_active, running
+    global active, running
     active = False
-    dash_active = False
     running = False
     if tray_icon:
         tray_icon.stop()
@@ -303,39 +287,10 @@ def auto_press():
             time.sleep(INTERVAL)
 
 
-# --- Auto-dash thread ---
-
-def auto_dash():
-    while running:
-        if not dash_active:
-            time.sleep(0.1)
-            continue
-
-        if not is_genshin_focused():
-            time.sleep(0.2)
-            continue
-
-        # Don't dash during dialogue or loading
-        if is_loading_screen() or is_dialogue_playing() or is_dialogue_option_available():
-            time.sleep(0.2)
-            continue
-
-        # Hold the dash key down, release briefly, repeat
-        dash_key_val = parse_key(config.get("dash_key", "Key.shift_l"))
-        keyboard.press(dash_key_val)
-        # Hold for 0.5s, checking if we should stop
-        for _ in range(10):
-            if not dash_active or not running:
-                break
-            time.sleep(0.05)
-        keyboard.release(dash_key_val)
-        time.sleep(0.02)
-
-
 # --- Genshin detection thread ---
 
 def genshin_watcher():
-    global genshin_running, active, dash_active
+    global genshin_running, active
     was_running = False
     while running:
         found = False
@@ -354,9 +309,8 @@ def genshin_watcher():
             if tray_icon:
                 tray_icon.notify("Genshin detected — ready to skip!", "Dialogue Skipper")
         elif not found and was_running:
-            if active or dash_active:
+            if active:
                 active = False
-                dash_active = False
                 threading.Thread(target=beep_off, daemon=True).start()
             update_tray()
 
@@ -370,8 +324,6 @@ def on_press(key):
     try:
         if key == toggle_key:
             toggle()
-        elif key == dash_toggle_key:
-            toggle_dash()
         elif key == quit_key:
             quit_app()
             return False
@@ -383,6 +335,7 @@ def on_press(key):
 
 def rebind_key(label, config_key):
     """Open a small tkinter window to capture a new key."""
+    global toggle_key, quit_key
     result = [None]
 
     def on_key(event):
@@ -419,13 +372,10 @@ def rebind_key(label, config_key):
         config[config_key] = key_str
         save_config(config)
 
-        global toggle_key, quit_key, dash_toggle_key
         if config_key == "toggle_key":
             toggle_key = result[0]
-        elif config_key == "quit_key":
+        else:
             quit_key = result[0]
-        elif config_key == "dash_toggle_key":
-            dash_toggle_key = result[0]
 
         restart_listener()
         if tray_icon:
@@ -458,51 +408,6 @@ def change_interaction_key():
 
     if result[0] is not None:
         config["interaction_key"] = result[0]
-        save_config(config)
-        if tray_icon:
-            tray_icon.update_menu()
-
-
-def change_dash_key():
-    """Open a small tkinter window to set the in-game dash/sprint key."""
-    result = [None]
-
-    def on_key(event):
-        ks = event.keysym.lower()
-        # Handle modifier keys
-        modifier_map = {
-            "shift_l": Key.shift_l, "shift_r": Key.shift_r,
-            "control_l": Key.ctrl_l, "control_r": Key.ctrl_r,
-            "alt_l": Key.alt_l, "alt_r": Key.alt_r,
-        }
-        if ks in modifier_map:
-            result[0] = modifier_map[ks]
-            root.destroy()
-        elif ks.startswith("f") and ks[1:].isdigit():
-            result[0] = getattr(Key, ks, None)
-            if result[0]:
-                root.destroy()
-        elif len(ks) == 1:
-            result[0] = KeyCode.from_char(ks)
-            root.destroy()
-
-    current = key_display_name(config.get("dash_key", "Key.shift_l"))
-    root = tk.Tk()
-    root.title("Dash Key")
-    root.geometry("300x100")
-    root.resizable(False, False)
-    root.attributes("-topmost", True)
-    tk.Label(
-        root,
-        text=f"Press your in-game dash/sprint key\n(currently: {current})",
-        font=("Segoe UI", 12),
-    ).pack(expand=True)
-    root.bind("<Key>", on_key)
-    root.focus_force()
-    root.mainloop()
-
-    if result[0] is not None:
-        config["dash_key"] = key_to_str(result[0])
         save_config(config)
         if tray_icon:
             tray_icon.update_menu()
@@ -598,23 +503,14 @@ def setup_tray():
     def on_toggle(icon, item):
         toggle()
 
-    def on_toggle_dash_menu(icon, item):
-        toggle_dash()
-
     def on_rebind_toggle(icon, item):
-        threading.Thread(target=lambda: rebind_key("Toggle Dialogue Skip", "toggle_key"), daemon=True).start()
-
-    def on_rebind_dash_toggle(icon, item):
-        threading.Thread(target=lambda: rebind_key("Toggle Auto-Dash", "dash_toggle_key"), daemon=True).start()
+        threading.Thread(target=lambda: rebind_key("Toggle Autoclicker", "toggle_key"), daemon=True).start()
 
     def on_rebind_quit(icon, item):
         threading.Thread(target=lambda: rebind_key("Quit App", "quit_key"), daemon=True).start()
 
     def on_change_interaction(icon, item):
         threading.Thread(target=change_interaction_key, daemon=True).start()
-
-    def on_change_dash_key(icon, item):
-        threading.Thread(target=change_dash_key, daemon=True).start()
 
     def on_toggle_startup(icon, item):
         toggle_startup()
@@ -633,12 +529,8 @@ def setup_tray():
 
     menu = pystray.Menu(
         pystray.MenuItem(
-            lambda text: f"Toggle Dialogue Skip ({key_display_name(config['toggle_key'])})",
+            lambda text: f"Toggle ({key_display_name(config['toggle_key'])})",
             on_toggle,
-        ),
-        pystray.MenuItem(
-            lambda text: f"Toggle Auto-Dash ({key_display_name(config['dash_toggle_key'])})",
-            on_toggle_dash_menu,
         ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
@@ -650,18 +542,10 @@ def setup_tray():
             lambda text: f"Interaction Key ({config.get('interaction_key', 'f').upper()})",
             on_change_interaction,
         ),
-        pystray.MenuItem(
-            lambda text: f"Dash Key ({key_display_name(config.get('dash_key', 'Key.shift_l'))})",
-            on_change_dash_key,
-        ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
-            lambda text: f"Change Skip Toggle Key ({key_display_name(config['toggle_key'])})",
+            lambda text: f"Change Toggle Key ({key_display_name(config['toggle_key'])})",
             on_rebind_toggle,
-        ),
-        pystray.MenuItem(
-            lambda text: f"Change Dash Toggle Key ({key_display_name(config['dash_toggle_key'])})",
-            on_rebind_dash_toggle,
         ),
         pystray.MenuItem(
             lambda text: f"Change Quit Key ({key_display_name(config['quit_key'])})",
@@ -689,7 +573,6 @@ def setup_tray():
 
     # Start background threads
     threading.Thread(target=auto_press, daemon=True).start()
-    threading.Thread(target=auto_dash, daemon=True).start()
     threading.Thread(target=genshin_watcher, daemon=True).start()
 
     listener = Listener(on_press=on_press)

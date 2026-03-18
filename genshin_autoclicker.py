@@ -416,40 +416,38 @@ def change_interaction_key():
 
 listener_ref = [None]
 overlay_root = None
-overlay_label = None
+overlay_canvas = None
+
+DOT_SIZE = 16
 
 
 def setup_overlay():
-    """Create a transparent, click-through overlay window."""
-    global overlay_root, overlay_label
+    """Create a transparent, click-through overlay with a small dot."""
+    global overlay_root, overlay_canvas
     import ctypes
 
     overlay_root = tk.Tk()
     overlay_root.title("GDS Overlay")
     overlay_root.overrideredirect(True)
     overlay_root.attributes("-topmost", True)
-    overlay_root.attributes("-alpha", 0.85)
 
-    # Transparent background with click-through
     transparent_color = "#010101"
     overlay_root.configure(bg=transparent_color)
     overlay_root.attributes("-transparentcolor", transparent_color)
 
-    # Position: top-left corner with a small margin
-    overlay_root.geometry(f"+20+20")
+    overlay_root.geometry(f"{DOT_SIZE + 4}x{DOT_SIZE + 4}+20+20")
 
-    overlay_label = tk.Label(
+    overlay_canvas = tk.Canvas(
         overlay_root,
-        text="Skip: OFF",
-        font=("Segoe UI Semibold", 12),
-        fg="#FF4444",
-        bg="#1a1a1a",
-        padx=8,
-        pady=4,
+        width=DOT_SIZE + 4,
+        height=DOT_SIZE + 4,
+        bg=transparent_color,
+        highlightthickness=0,
     )
-    overlay_label.pack()
+    overlay_canvas.pack()
+    overlay_canvas.create_oval(2, 2, DOT_SIZE + 2, DOT_SIZE + 2, fill="#FF4444", outline="", tags="dot")
 
-    # Make the window click-through on Windows
+    # Make click-through
     hwnd = ctypes.windll.user32.FindWindowW(None, "GDS Overlay")
     if hwnd:
         GWL_EXSTYLE = -20
@@ -462,22 +460,20 @@ def setup_overlay():
             style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
         )
 
-    overlay_root.withdraw()  # Start hidden
+    overlay_root.withdraw()
 
 
 def run_overlay():
-    """Run the overlay mainloop (must be on its own thread or main thread)."""
+    """Run the overlay mainloop."""
     setup_overlay()
-    # Periodic self-update via after()
+
     def tick():
         if not running:
             overlay_root.destroy()
             return
         if config.get("overlay_enabled", True) and genshin_running and is_genshin_focused():
-            if active:
-                overlay_label.configure(text="Skip: ON", fg="#44FF44")
-            else:
-                overlay_label.configure(text="Skip: OFF", fg="#FF4444")
+            color = "#44FF44" if active else "#FF4444"
+            overlay_canvas.itemconfig("dot", fill=color)
             overlay_root.deiconify()
             overlay_root.lift()
         else:

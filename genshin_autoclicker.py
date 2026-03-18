@@ -71,8 +71,7 @@ def get_loading_screen_pos():
 # --- Dialogue detection ---
 
 PLAYING_ICON_COLOR = (236, 229, 216)
-LOADING_SCREEN_WHITE = (255, 255, 255)
-DIALOGUE_ICON_WHITE = (255, 255, 255)
+SCREEN_WHITE = (255, 255, 255)
 
 
 def is_genshin_focused():
@@ -98,17 +97,17 @@ def is_dialogue_option_available():
     try:
         # Skip if loading screen (white)
         lx, ly = get_loading_screen_pos()
-        if pyautogui.pixel(lx, ly) == LOADING_SCREEN_WHITE:
+        if pyautogui.pixel(lx, ly) == SCREEN_WHITE:
             return False
 
         # Check lower dialogue icon
         dx, dy_low = get_dialogue_icon_lower_pos()
-        if pyautogui.pixel(dx, dy_low) == DIALOGUE_ICON_WHITE:
+        if pyautogui.pixel(dx, dy_low) == SCREEN_WHITE:
             return True
 
         # Check higher dialogue icon
         _, dy_high = get_dialogue_icon_higher_pos()
-        if pyautogui.pixel(dx, dy_high) == DIALOGUE_ICON_WHITE:
+        if pyautogui.pixel(dx, dy_high) == SCREEN_WHITE:
             return True
 
         return False
@@ -120,7 +119,7 @@ def is_loading_screen():
     """Check if a loading screen is active."""
     try:
         lx, ly = get_loading_screen_pos()
-        return pyautogui.pixel(lx, ly) == LOADING_SCREEN_WHITE
+        return pyautogui.pixel(lx, ly) == SCREEN_WHITE
     except Exception:
         return False
 
@@ -266,11 +265,6 @@ def auto_press():
             continue
 
         if smart:
-            # Smart mode: only press when dialogue is detected
-            if is_loading_screen():
-                time.sleep(0.2)
-                continue
-
             dialogue = is_dialogue_playing()
             options = is_dialogue_option_available()
 

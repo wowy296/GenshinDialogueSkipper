@@ -1,6 +1,31 @@
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+config.json
+token.txt
+
+# Python
 __pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+
+# PyInstaller
 *.spec
 build/
 dist/
+output/
 *.exe
-config.json
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

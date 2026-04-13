@@ -1,4 +1,4 @@
-# Secrets
+# Secrets — never commit these
 .env
 .env.*
 *.key
@@ -6,13 +6,34 @@
 secrets.json
 config.json
 token.txt
+credentials.json
+*.secret
 
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 venv/
 .venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Package managers
+Pipfile.lock
+poetry.lock
+.pdm.toml
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.cover
+.mypy_cache/
+.ruff_cache/
 
 # PyInstaller
 *.spec
@@ -21,11 +42,27 @@ dist/
 output/
 *.exe
 
+# Runtime artifacts
+*.log
+logs/
+screenshots/
+*.tmp
+*.bak
+
 # IDEs
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
+.spyderproject.cfg
+.ropeproject/
 
 # OS
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.lnk
